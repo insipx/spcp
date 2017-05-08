@@ -27,13 +27,13 @@ pub static counter_mask: [u32; 32] =
 ];
 
 // holds the state
-struct SPC_DSP<'a> {
-   m:State<'a>,
+struct SPC_DSP {
+   m:State<'static>,
 }
 
-pub trait Emulator<'a> {
-    
-    fn init(&self, ram_64K: &mut u8);
+pub trait Emulator<'a, 'b:'a> {
+   
+    fn init(&mut self, ram_64K: &'b mut u8);
 
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]);
 
@@ -42,14 +42,14 @@ pub trait Emulator<'a> {
     fn run(clock_count: isize);
 }
 
-impl<'a, 'b:'a> Emulator<'a> for SPC_DSP<'b> {
-   
-    fn init(&self, ram_64K: &mut u8) {
-        m.set_ram(ram_64K); 
-        m.mute_voices(0);
-        m.disable_surround(false);
-        m.set_output(0 as *mut sample_t, 0isize);
-        m.reset();
+impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
+  
+    fn init(&mut self, ram_64K: &'b mut u8) {
+        self.m.set_ram(ram_64K); 
+        self.m.mute_voices(0);
+        self.m.disable_surround(false);
+        self.m.set_output(0 as *mut sample_t, 0isize);
+        self.m.reset();
 
         if NDEBUG {
             assert_eq!(0x8000 as i16, -0x8000);
@@ -63,7 +63,7 @@ impl<'a, 'b:'a> Emulator<'a> for SPC_DSP<'b> {
     }
 
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]) {
-        m.regs = regs;
+        self.m.regs = regs;
 
         let mut i:isize;
         //be careful here
@@ -71,8 +71,9 @@ impl<'a, 'b:'a> Emulator<'a> for SPC_DSP<'b> {
             self.m.voices[i].brr_offset = 1;
             self.m.voices[i].buf_pos = 0;
         }
-        self.m.new_kon = reg!(kon) as isize;
-        self.m.mute_voices(m.mute_mask);
+        self.m.new_kon = self.m.regs[reg!(kon)] as isize;
+        let mask = self.m.mute_mask;
+        self.m.mute_voices(mask);
         self.m.soft_reset_common();
     }
 

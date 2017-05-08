@@ -30,21 +30,43 @@ macro_rules! rate {
 }
 
 macro_rules! reg {
-    (mvoll) => (m.regs[GlobalRegisters::r_mvoll as usize]);
-    (mvolr) => (m.regs[GlobalRegisters::r_mvolr as usize]);
-    (evoll) => (m.regs[GlobalRegisters::r_evoll as usize]);
-    (evolr) => (m.regs[GlobalRegisters::r_evolr as usize]);
-    (kon)   => (m.regs[GlobalRegisters::r_kon   as usize]);
-    (koff)  => (m.regs[GlobalRegisters::r_koff  as usize]);
-    (flg)   => (m.regs[GlobalRegisters::r_flg   as usize]);
-    (endx)  => (m.regs[GlobalRegisters::r_endx  as usize]);
-    (efb)   => (m.regs[GlobalRegisters::r_efb   as usize]);
-    (pmon)  => (m.regs[GlobalRegisters::r_pmon  as usize]);
-    (non)   => (m.regs[GlobalRegisters::r_non   as usize]);
-    (eon)   => (m.regs[GlobalRegisters::r_eon   as usize]);
-    (dir)   => (m.regs[GlobalRegisters::r_dir   as usize]);
-    (esa)   => (m.regs[GlobalRegisters::r_esa   as usize]);
-    (edl)   => (m.regs[GlobalRegisters::r_edl   as usize]);
-    (fir)   => (m.regs[GlobalRegisters::r_fir   as usize]);
+    (mvoll) => (GlobalRegisters::r_mvoll as usize);
+    (mvolr) => (GlobalRegisters::r_mvolr as usize);
+    (evoll) => (GlobalRegisters::r_evoll as usize);
+    (evolr) => (GlobalRegisters::r_evolr as usize);
+    (kon)   => (GlobalRegisters::r_kon   as usize);
+    (koff)  => (GlobalRegisters::r_koff  as usize);
+    (flg)   => (GlobalRegisters::r_flg   as usize);
+    (endx)  => (GlobalRegisters::r_endx  as usize);
+    (efb)   => (GlobalRegisters::r_efb   as usize);
+    (pmon)  => (GlobalRegisters::r_pmon  as usize);
+    (non)   => (GlobalRegisters::r_non   as usize);
+    (eon)   => (GlobalRegisters::r_eon   as usize);
+    (dir)   => (GlobalRegisters::r_dir   as usize);
+    (esa)   => (GlobalRegisters::r_esa   as usize);
+    (edl)   => (GlobalRegisters::r_edl   as usize);
+    (fir)   => (GlobalRegisters::r_fir   as usize);
 }
 
+
+/*
+macro_rules! reg {
+    (mvoll) => (unsafe{*(REGS + GlobalRegisters::r_mvoll as usize)});
+    (mvolr) => (unsafe{*REGS[GlobalRegisters::r_mvolr as usize]});
+    (evoll) => (unsafe{*REGS[GlobalRegisters::r_evoll as usize]});
+    (evolr) => (unsafe{*REGS[GlobalRegisters::r_evolr as usize]});
+    (kon)   => (unsafe{*(REGS.offset(GlobalRegisters::r_kon   as isize))});
+    (koff)  => (unsafe{*REGS[GlobalRegisters::r_koff  as usize]});
+    (flg)   => (unsafe{*REGS[GlobalRegisters::r_flg   as usize]});
+    (endx)  => (unsafe{*REGS[GlobalRegisters::r_endx  as usize]});
+    (efb)   => (unsafe{*REGS[GlobalRegisters::r_efb   as usize]});
+    (pmon)  => (unsafe{*REGS[GlobalRegisters::r_pmon  as usize]});
+    (non)   => (unsafe{*REGS[GlobalRegisters::r_non   as usize]});
+    (eon)   => (unsafe{*REGS[GlobalRegisters::r_eon   as usize]});
+    (dir)   => (unsafe{*REGS[GlobalRegisters::r_dir   as usize]});
+    (esa)   => (unsafe{*REGS[GlobalRegisters::r_esa   as usize]});
+    (edl)   => (unsafe{*REGS[GlobalRegisters::r_edl   as usize]});
+    (fir)   => (unsafe{*REGS[GlobalRegisters::r_fir   as usize]});
+}
+
+*/
