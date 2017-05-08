@@ -1,5 +1,7 @@
 #![feature(associated_consts)]
 #![feature(concat_idents)]
+#![feature(type_ascription)]
+#![allow(exceeding_bitshifts)]
 
 #[macro_use]
 mod macros;
