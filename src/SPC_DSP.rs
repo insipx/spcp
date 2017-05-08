@@ -43,7 +43,8 @@ pub trait Emulator<'a, 'b:'a> {
 }
 
 impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
-    fn new() -> SPC_DSP {
+
+    fn new() -> Self {
         SPC_DSP {
             m: State::new(),
         } 
