@@ -1,4 +1,4 @@
-# SPC-Player
+# spcp (SPC Player)
 ## The emulator interfaces for SPC_DSP
 
 Since there is no header file equivalent in Rust, I re-created what I think
