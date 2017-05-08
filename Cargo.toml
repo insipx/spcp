@@ -1,0 +1,10 @@
+[package]
+name = "SPC-Player"
+description = "SNES Emulator to play SPC's"
+version = "0.1.0"
+authors = ["Andrew Plaza <andrew.plaza15@gmail.com>"]
+
+[dependencies]
+
+[lib]
+path = "src/lib.rs"
