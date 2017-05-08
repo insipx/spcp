@@ -27,12 +27,12 @@ pub static counter_mask: [u32; 32] =
 ];
 
 // holds the state
-struct SPC_DSP {
-   m:State<'static>,
+pub struct SPC_DSP {
+    m:State<'static>,
 }
 
 pub trait Emulator<'a, 'b:'a> {
-   
+    fn new() -> SPC_DSP; 
     fn init(&mut self, ram_64K: &'b mut u8);
 
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]);
@@ -43,7 +43,12 @@ pub trait Emulator<'a, 'b:'a> {
 }
 
 impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
-  
+    fn new() -> SPC_DSP {
+        SPC_DSP {
+            m: State::new(),
+        } 
+    }
+
     fn init(&mut self, ram_64K: &'b mut u8) {
         self.m.set_ram(ram_64K); 
         self.m.mute_voices(0);

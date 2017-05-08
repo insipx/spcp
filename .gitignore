@@ -3,4 +3,4 @@ target/
 .*.swp
 .*.swo
 .*.sw*
-
+out
