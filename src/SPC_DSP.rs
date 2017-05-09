@@ -6,6 +6,8 @@ use registers::GlobalRegisters;
 use registers::EnvMode;
 use sizes::Sizes;
 use state::State;
+use voice::Voice;
+
 use config::*;
 
 use macros;
@@ -33,13 +35,13 @@ pub struct SPC_DSP {
 
 pub trait Emulator<'a, 'b:'a> {
     fn new() -> SPC_DSP; 
-    fn init(&mut self, ram_64K: &'b mut u8);
+    fn init(&mut self, ram_64K: [u8;0xFFFF]);
 
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]);
 
     // Runs DSP for specified number of clocks (~1024000 per second). Every 32 clocks
     // a pair of samples is to be generated
-    fn run(clock_count: isize);
+    fn run(&mut self, clock_count: i64);
 }
 
 impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
@@ -50,11 +52,11 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
         } 
     }
 
-    fn init(&mut self, ram_64K: &'b mut u8) {
+    fn init(&mut self, ram_64K: [u8;0xFFFF]) {
         self.m.set_ram(ram_64K); 
         self.m.mute_voices(0);
         self.m.disable_surround(false);
-        self.m.set_output(0 as *mut sample_t, 0isize);
+        self.m.set_output(0 as *mut sample_t, 0i64);
         self.m.reset();
 
         if NDEBUG {
@@ -71,21 +73,100 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]) {
         self.m.regs = regs;
 
-        let mut i:isize;
+        let mut i:i64;
         //be careful here
         for i in (0..Sizes::VOICE_COUNT).rev() {
             self.m.voices[i].brr_offset = 1;
             self.m.voices[i].buf_pos = 0;
         }
-        self.m.new_kon = self.m.regs[reg!(kon)] as isize;
+        self.m.new_kon = self.m.regs[reg!(kon)] as i64;
         let mask = self.m.mute_mask;
         self.m.mute_voices(mask);
         self.m.soft_reset_common();
     }
 
-    fn run(clock_count: isize) {
-        unimplemented!(); 
+    fn run(&mut self, clock_count: i64) {
+        let new_phase: i64 = self.m.get_phase() + clock_count;
+        let count: i64 = new_phase >> 5;
+        self.m.set_phase((new_phase & 31)); //raises can't mutably borrow immutable field
+        if count == 0  {
+            return; 
+        }
+
+        let dir: u8 = self.m.ram[self.m.regs[reg!(dir)] * 0x100];
+        let slow_gaussian:i64 = (self.m.regs[reg!(pmon)] >> 1) | self.m.regs[reg!(non)];
+        let noise_rate:i64 = self.m.regs[reg!(flg)] & 0x1F;
+
+        //global volume
+        let mvoll:i8 = self.m.regs[reg!(mvoll)] as i8;
+        let mvolr:i8 = self.m.regs[reg!(mvolr)] as i8;
+
+        if mvoll * mvolr < self.m.surround_threshold {
+            mvoll = -mvoll;
+        }
+
+        loop {
+            // KON/KOFF reading
+            if (self.m.every_other_sample ^= 1) != 0 {
+                self.m.new_kon &= !self.m.kon;
+                self.m.kon = self.m.new_kon;
+                self.m.t_koff = self.m.regs[reg!(koff)];
+            }
+
+            self.run_counter( 1i64 );
+            self.run_counter( 2i64 );
+            self.run_counter( 3i64 );
+
+            // Noise
+            if !read_counter!( noise_rate, self.m ) {
+                let feedback: i64 = (self.m.noise << 13) ^ (self.m.noise << 14);
+                self.m.noise = (feedback & 0x4000 ) ^ (self.m.noise >> 1);
+            }
+             
+            let pmon_input = 0;
+            let main_out_l = 0;
+            let main_out_r = 0;
+            let echo_out_l = 0;
+            let echo_out_r = 0;
+            let v:Voice = self.m.voices[0];
+            let vbit = 1;
+
+            loop {
+                macro_rules! sample_ptr {
+                    ( $i:expr ) => {
+                        &dir [self.m.regs[vreg!(srcn)] * 4 + i * 2];
+                    }
+                }
+
+                let brr_header: i64 = ram[v.brr_addr];
+                let kon_delay: i64 = v.kon_delay; 
+
+                // Pitch
+                let mut pitch: i64 = self.m.regs[vreg!(pitchl)].to_le() & 0x3FFF;
+                if (self.m.regs[reg!(pmon)] & vbit) != 0 {
+                    pitch += ((pmon_input >> 5) * pitch) >> 10;
+
+                    // KON phases
+                    if --kon_delay >= 0 {
+                        v.kon_delay = kon_delay;
+                        if kon_delay == 4 {
+                            v.brr_addr =  
+                        }
+
+
+                    }
+                }
+
+
+            }
+
+            
+        }
+        
+        
     }
+
+
 }
 
 

@@ -17,9 +17,9 @@ macro_rules! read_counter {
     }
 }
 
-//TODO some tricks because you can't use if-else in static invocation
-//will eventually be added in Rust
-//but for now hacky implementation
+// TODO some tricks because you can't use if-else in static invocation
+// will eventually be added in Rust
+// but for now hacky implementation
 macro_rules! rate {
    ( $rate:expr, $div:expr ) => {
         (
@@ -46,6 +46,20 @@ macro_rules! reg {
     (esa)   => (GlobalRegisters::r_esa   as usize);
     (edl)   => (GlobalRegisters::r_edl   as usize);
     (fir)   => (GlobalRegisters::r_fir   as usize);
+}
+
+macro_rules! vreg {
+    (voll) => (VoiceRegisters::r_voll   as usize);
+    (volr) => (VoiceRegisters::r_voll   as usize);
+    (pitchl) => (VoiceRegisters::r_voll as usize);
+    (pitchh) => (VoiceRegisters::r_voll as usize);
+    (srcn) => (VoiceRegisters::r_voll   as usize);
+    (adsr0) => (VoiceRegisters::r_voll  as usize);
+    (adsr0) => (VoiceRegisters::r_voll  as usize);
+    (adsr1) => (VoiceRegisters::r_voll  as usize);
+    (gain) => (VoiceRegisters::r_voll   as usize);
+    (envx) => (VoiceRegisters::r_voll   as usize);
+    (outx) => (VoiceRegisters::r_voll   as usize);
 }
 
 

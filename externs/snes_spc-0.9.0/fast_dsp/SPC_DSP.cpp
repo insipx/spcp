@@ -75,19 +75,15 @@ static BOOST::uint8_t const initial_regs [SPC_DSP::register_count] =
 
 void SPC_DSP::set_output( sample_t* out, int size )
 {
-  //sets out to the address of the beginning of m.extra's memory
-  //sets size to Sizes::EXTRA_SIZE
-  //m.out_begin 
-  // I think all this can be done with indices
 	require( (size & 1) == 0 ); // must be even
 	if ( !out )
 	{
 		out  = m.extra;
 		size = extra_size;
 	}
-	m.out_begin = out; //set out begin to the beginning of m.extras memory
-	m.out       = out;  // beg of m.extras mem
-	m.out_end   = out + size; //beginning of m.extras mem + size
+	m.out_begin = out;
+	m.out       = out;
+	m.out_end   = out + size;
 }
 
 // Volume registers and efb are signed! Easy to forget int8_t cast.
@@ -234,7 +230,7 @@ void SPC_DSP::run( int clock_count )
 		int echo_out_l = 0;
 		int echo_out_r = 0;
 		voice_t* v = m.voices;
-		uint8_t* v_regs = m.regs; // v_regs = m.regs
+		uint8_t* v_regs = m.regs;
 		int vbit = 1;
 		do
 		{
