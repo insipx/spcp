@@ -78,7 +78,6 @@ impl<'a> State<'a> {
     //screw it!
     pub fn set_ram(&mut self, ref ram_64K: &Vec<u8>) {
         assert_eq!(ram_64K.len(), 0xFFFF);
-        println!("RAM64K: {}", ram_64K.len());
         ram_64K.iter().map(|x| self.ram.push(*x));
     }
 
