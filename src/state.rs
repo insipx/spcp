@@ -22,20 +22,22 @@ pub struct State<'a> {
     pub regs: [u8; Sizes::REGISTER_COUNT as usize],
     echo_hist: Option<[[&'a mut i64; 2]; (Sizes::ECHO_HIST_SIZE * 2) as usize]>,
     /*echo_hist_pos: [&'a mut i64; 2], //&echo hist[0 to 7]*/ //ignoring this for now
-    every_other_sample: i64,
-    kon: i64,
-    noise: i64,
+    pub every_other_sample: i64,
+    pub kon: i64,
+    pub noise: i64,
     echo_offset: i64,
     echo_length: i64,
     phase: i64,
     counters: [usize; 4],
     pub new_kon: i64,
-    t_koff: i64,
+    pub t_koff: i64,
     pub voices: [Voice; Sizes::VOICE_COUNT as usize],
-    counter_select: [usize; 32],
-    pub ram: [u8; 0xFFFF], // 64K shared RAM between DSP and SMP
+        //hold the address, actual implementation in C++ is: unsigned* counter_select[32] (an array of pointers, store place in arr instead)
+    pub counter_select: [u32; 32], 
+    pub ram: &'a Vec<u8>,
+    //pub ram: [u8; Sizes::RAM_SIZE as usize], // 64K shared RAM between DSP and SMP
     pub mute_mask: i64,
-    surround_threshold: i64,
+    pub surround_threshold: i64,
     out: Option<*mut sample_t>,
     out_end: Option<*mut sample_t>,
     out_begin: Option<*mut sample_t>,
@@ -61,18 +63,18 @@ impl State<'static> {
             t_koff: 0,
             voices: [Voice::new(); Sizes::VOICE_COUNT as usize],
             counter_select: [0;32],
-            ram: [0u8; 0xFFFF], // 64K shared RAM between DSP and SMP
+            ram: &Vec::new(), // 64K shared RAM between DSP and SMP
             mute_mask: 0,
             surround_threshold: 0,
             out: None,
             out_end: None,
             out_begin: None,
             extra: [0; Sizes::EXTRA_SIZE as usize],
-        } 
+        }
     }
     
-    pub fn set_ram(&mut self, ram_64K: [u8;0xFFFF]) {
-        self.ram = ram_64K; 
+    pub fn set_ram(&mut self, &ram_64K: &Vec<u8>) {
+        self.ram = &ram_64K; 
     }
 
     pub fn extra(&self) -> [sample_t; 16] {
@@ -142,10 +144,10 @@ impl State<'static> {
         self.counters[2] = (!0) << 5; // FFFFFFE0 ie: 4 bytes, last 5 bits 0
         self.counters[3] = 0x0B;
 
-        let mut n = 2;
+        let mut n:u32 = 2;
 
         for i in 0..32 {
-            self.counter_select[i] = n as usize;
+            self.counter_select[i] = n;
             //TODO: Make sure this is OK
             n -= 1;
             if n == 0 {

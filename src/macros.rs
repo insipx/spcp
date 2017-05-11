@@ -13,7 +13,7 @@ macro_rules! clamp16 {
 
 macro_rules! read_counter {
     ( $rate:expr, $state:expr) => {
-        (*$state.counter_select[$rate] & counter_mask![$rate])
+        ($state.counter_select[$rate as usize] & counter_mask[$rate as usize])
     }
 }
 
@@ -49,17 +49,16 @@ macro_rules! reg {
 }
 
 macro_rules! vreg {
-    (voll) => (VoiceRegisters::r_voll   as usize);
-    (volr) => (VoiceRegisters::r_voll   as usize);
-    (pitchl) => (VoiceRegisters::r_voll as usize);
-    (pitchh) => (VoiceRegisters::r_voll as usize);
-    (srcn) => (VoiceRegisters::r_voll   as usize);
-    (adsr0) => (VoiceRegisters::r_voll  as usize);
-    (adsr0) => (VoiceRegisters::r_voll  as usize);
-    (adsr1) => (VoiceRegisters::r_voll  as usize);
-    (gain) => (VoiceRegisters::r_voll   as usize);
-    (envx) => (VoiceRegisters::r_voll   as usize);
-    (outx) => (VoiceRegisters::r_voll   as usize);
+    (voll) => (VoiceRegisters::v_voll     as usize);
+    (volr) => (VoiceRegisters::v_volr     as usize);
+    (pitchl) => (VoiceRegisters::v_pitchl as usize);
+    (pitchh) => (VoiceRegisters::v_pitchh as usize);
+    (srcn) => (VoiceRegisters::v_srcn     as usize);
+    (adsr0) => (VoiceRegisters::v_adsr0   as usize);
+    (adsr1) => (VoiceRegisters::v_adsr1   as usize);
+    (gain) => (VoiceRegisters::v_gain     as usize);
+    (envx) => (VoiceRegisters::v_envx     as usize);
+    (outx) => (VoiceRegisters::v_outx     as usize);
 }
 
 

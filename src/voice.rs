@@ -7,10 +7,10 @@ pub struct Voice {
     // decoded samples. should be twice the size to simplify wrap handling
     buf: [i64; (Sizes::BRR_BUF_SIZE * 2) as usize],
     pub buf_pos: usize, // place in buffer where next samples will be decoded
-    interp_pos: i64, // relative fractional positoin in sample (0x1000 = 1.0)
-    brr_addr: i64, // address of current BRR block
+    interp_pos: i64, // relative fractional position in sample (0x1000 = 1.0)
+    pub brr_addr: i64, // address of current BRR block
     pub brr_offset: i64, // current decoding offset in BRR block
-    kon_delay: i64, // KON delay/current setup phase
+    pub kon_delay: i64, // KON delay/current setup phase
     env_mode: EnvMode,
     env: i64, // current envelope level
     hidden_env: i64, // used by GAIN mode 7, obscure quirk

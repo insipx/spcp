@@ -5,6 +5,7 @@ impl Sizes {
     pub const ECHO_HIST_SIZE: usize = 8;
     pub const BRR_BUF_SIZE: usize = 12;
     pub const EXTRA_SIZE: usize = 16;
+    pub const RAM_SIZE: u64 = 0xFFFF;
 }
 
 

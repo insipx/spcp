@@ -3,6 +3,7 @@ use std::ptr;
 use state::sample_t as sample_t;
 use state::NULL_U8 as NULL_U8;
 use registers::GlobalRegisters;
+use registers::VoiceRegisters;
 use registers::EnvMode;
 use sizes::Sizes;
 use state::State;
@@ -35,7 +36,7 @@ pub struct SPC_DSP {
 
 pub trait Emulator<'a, 'b:'a> {
     fn new() -> SPC_DSP; 
-    fn init(&mut self, ram_64K: [u8;0xFFFF]);
+    fn init(&mut self, ram_64K: &Vec<u8>);
 
     fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]);
 
@@ -52,7 +53,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
         } 
     }
 
-    fn init(&mut self, ram_64K: [u8;0xFFFF]) {
+    fn init(&mut self, ram_64K: &Vec<u8>) {
         self.m.set_ram(ram_64K); 
         self.m.mute_voices(0);
         self.m.disable_surround(false);
@@ -92,33 +93,35 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
         if count == 0  {
             return; 
         }
-
-        let dir: u8 = self.m.ram[self.m.regs[reg!(dir)] * 0x100];
-        let slow_gaussian:i64 = (self.m.regs[reg!(pmon)] >> 1) | self.m.regs[reg!(non)];
-        let noise_rate:i64 = self.m.regs[reg!(flg)] & 0x1F;
+        
+        let dir: Vec<u8> = self.m.ram[(self.m.regs[reg!(dir)] * 0x100)..(0xFFFF)]; 
+        //let dir: [u8; (Sizes::RAM_SIZE - (self.m.regs[reg!(dir)] * 0x100i64))] = self.m.ram[(self.m.regs[reg!(dir)] * 0x100)..(Sizes::RAM_SIZE)];
+        let slow_gaussian:i64 = ((self.m.regs[reg!(pmon)] >> 1) | self.m.regs[reg!(non)]) as i64; 
+        let noise_rate:i64 = (self.m.regs[reg!(flg)] & 0x1F) as i64;
 
         //global volume
         let mvoll:i8 = self.m.regs[reg!(mvoll)] as i8;
         let mvolr:i8 = self.m.regs[reg!(mvolr)] as i8;
 
-        if mvoll * mvolr < self.m.surround_threshold {
+        if ((mvoll * mvolr) as i64) < self.m.surround_threshold {
             mvoll = -mvoll;
         }
 
         loop {
             // KON/KOFF reading
-            if (self.m.every_other_sample ^= 1) != 0 {
+            self.m.every_other_sample ^= 1;
+            if self.m.every_other_sample != 0i64 {
                 self.m.new_kon &= !self.m.kon;
                 self.m.kon = self.m.new_kon;
-                self.m.t_koff = self.m.regs[reg!(koff)];
+                self.m.t_koff = self.m.regs[reg!(koff)] as i64;
             }
 
-            self.run_counter( 1i64 );
-            self.run_counter( 2i64 );
-            self.run_counter( 3i64 );
+            self.m.run_counter( 1i64 );
+            self.m.run_counter( 2i64 );
+            self.m.run_counter( 3i64 );
 
             // Noise
-            if !read_counter!( noise_rate, self.m ) {
+            if read_counter!(noise_rate, self.m) == 0 {
                 let feedback: i64 = (self.m.noise << 13) ^ (self.m.noise << 14);
                 self.m.noise = (feedback & 0x4000 ) ^ (self.m.noise >> 1);
             }
@@ -134,15 +137,15 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             loop {
                 macro_rules! sample_ptr {
                     ( $i:expr ) => {
-                        &dir [self.m.regs[vreg!(srcn)] * 4 + i * 2];
+                        dir[(self.m.regs[vreg!(srcn)] * 4 + $i * 2) as usize];
                     }
                 }
 
-                let brr_header: i64 = ram[v.brr_addr];
+                let brr_header: i64 = self.m.ram[v.brr_addr as usize] as i64;
                 let kon_delay: i64 = v.kon_delay; 
 
                 // Pitch
-                let mut pitch: i64 = self.m.regs[vreg!(pitchl)].to_le() & 0x3FFF;
+                let mut pitch: i64 = (self.m.regs[vreg!(pitchl)].to_le() & 0x3FFF) as i64;
                 if (self.m.regs[reg!(pmon)] & vbit) != 0 {
                     pitch += ((pmon_input >> 5) * pitch) >> 10;
 
@@ -150,7 +153,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     if --kon_delay >= 0 {
                         v.kon_delay = kon_delay;
                         if kon_delay == 4 {
-                            v.brr_addr =  
+                            v.brr_addr =  sample_ptr!(0) as i64;
                         }
 
 
