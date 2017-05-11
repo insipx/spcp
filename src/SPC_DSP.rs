@@ -127,8 +127,8 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             }
              
             let pmon_input = 0;
-            let main_out_l = 0;
-            let main_out_r = 0;
+            let mut main_out_l = 0;
+            let mut main_out_r = 0;
             let echo_out_l = 0;
             let echo_out_r = 0;
             let mut v:Voice = self.m.voices[0];
@@ -141,7 +141,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     }
                 }
 
-                let brr_header: i64 = self.m.ram[v.brr_addr as usize] as i64;
+                let mut brr_header: i64 = self.m.ram[v.brr_addr as usize] as i64;
                 let kon_delay: i64 = v.kon_delay; 
 
                 // Pitch
@@ -153,23 +153,180 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     if --kon_delay >= 0 {
                         v.kon_delay = kon_delay;
                         if kon_delay == 4 {
-                            v.brr_addr =  sample_ptr!(0) as i64;
+                            v.brr_addr   =  sample_ptr!(0) as i64;
+                            v.brr_offset = 1;
+                            v.buf_pos    = v.buf;
+                            vrr_header   = 0;
                         }
 
+                        // Envelope is never run during KON
+                        v.env        = 0;
+                        v.hidden_env = 0;
 
+                        // Disable BRR decoding until last three samples
+                        if (kon_delay & 3) != 0 {
+                            v.interp_pos = 0x4000; 
+                        } else {
+                            v.interp_pos = 0; 
+                        }
+                        pitch = 0;
                     }
+                    let env: i64 = v.env;
+                    //Gaussian interpolation
+                    {
+                        let output: i64 = 0;
+                        self.m.regs[vreg!(envx)] = (env >> 4) as u8;
+                        if env != 0 {
+                            // Make pointers into gaussian based on fractional position between
+                            // samples
+                            let mut offset: i64 = ((v.interp_pos >> (3 & 0x1FE)) as usize) as i64;
+                            let fwd: *const i16 = &registers::interleved_gauss[0] + offset as usize;
+                            let rev: *const i16 = &regsiters::interleved_gauss[0] + 510 - (offset as usize);
+                            
+                            let _in: *const i64 = &v.buf_pos[(v.interp_pos >> 12) as usize];
+                            
+                            if (slow_gaussian & vbit) == 0 { //99%
+                                // Faster approximation when exact sample value isn't necessary for
+                                // pitch mod 
+                                output = (fwd * _in +
+                                          fwd.wrapping_offset(1) * _in.wrapping_offset(1) +
+                                          rev.wrapping_offset(1) * _in.wrapping_offset(2) +
+                                          rev.wrapping_offset(1) * _in.wrapping_offset(3)) >> 11;
+                                output = (output * env) >> 11;
+                            }else {
+                                output = (m.noise *2 ) as i16;
+                                if (self.m.regs[reg!(non)] & vbit) == 0 {
+                                    output = (fwd.wrapping_offset(0) * _in.wrapping_offset(0))  >> 11;
+                                    output += (fwd.wrapping_offset(1) * _in.wrapping_offset(1)) >> 11;
+                                    output += (rev.wrapping_offset(1) * _in.wrapping_offset(2)) >> 11;
+                                    output = output as i16;
+                                    output += (rev.wrapping_offset(0) * _in.wrapping_offset(3)) >> 11;
+                                    calmp16!(output);
+                                    output &= !1;
+                                }
+                                output = (output * env) >> 11 & !1;
+                            }
+                            // Output
+                            let l: i64 = output * v.volume[0];
+                            let r: i64 = output * v.volume[1];
+
+                            main_out_l += l;
+                            main_out_r += r;
+
+                            if self.m.regs[reg![eon)] & vbit] != 0 {
+                                echo_out_l += l;
+                                echo_out_r += r;
+                            }
+                        }
+                        pmon_input = output;
+                        self.m.regs[vreg!(outx)] = (output >> 8) as u8;
+                    }
+
+                    // Soft reset or end of sample
+                    if ((self.m.regs[reg!(flg)]) & 0x80 != 0) || (brr_header & 3) == 1) {
+                        v.env_mode = registers::EnvMode::env_release;
+                        env        = 0;
+                    }
+
+                    if (m.every_other_sample != 0 ) {
+                        // KOFF
+                        if (self.m.t_koff & vbit) != 0 {
+                            v.env_mode = registers::EnvMode::env_release;
+                        }
+
+                        // KON
+                        if (m.kon & vbit) != 0 {
+                            v.kon_delay = 5;
+                            v.env_mode = registers::EnvMode::env_attack;
+                            self.m.regs[reg!(endx)] &= ~vbit; 
+                        }
+                    }
+
+                    // Envelope
+                    if v.kon_delay == 0 {
+                        if v.env_mode == registers::EnvMode::env_release { // 97%
+                            env -= 0x8;
+                            v.env = env;
+                            if env <= 0 {
+                                v.env = 0;
+                                goto skip_brr; // TODO: NO BRR decoding for you! (remove goto)
+                            }
+                        } else { // 3%
+                            let rate: i64;
+                            let adsr0: i64 = self.m.regs[vreg!(adsr0)];
+                            let env_data: i64 = self.m.regs[vreg!(adsr1)];
+                            if ( adsr0 >= 0x80 ) /* 97% ADSR  */ {
+                                if  v.env_mode > regsiters::EnvMode::env_decay {
+                                    env -= 1;
+                                    env -= env >> 8;
+                                    rate = env_data & 0x1F;
+
+                                    // optimized handling
+                                    v.hidden_env = env;
+                                    if read_counter!(rate) != 0 {
+                                        goto exit_env; // TODO 
+                                    }
+                                    v.env = env;
+                                    goto exit_env; // TODO
+                                } else if v.env_mode == registers::EnvMode::env_decay {
+                                    env -= 1;
+                                    env -= env >> 8;
+                                    rate = (adsr0 >> 3 & 0x0E) + 0x10;
+                                } else /* env_attack */ {
+                                    rate = (adsr0 & 0x0F) * 2 + 1;
+                                    if rate < 31 { env += 0x20;}
+                                    else {env+= 0x400;}
+                                }
+                            }else /* GAIN */ {
+                                let mut mode: i64;
+                                env_data = self.m.regs[vreg!(gain)];
+                                mode = env_data >> 5;
+                                if mode < 4  /* direct */ {
+                                    env = env_data * 0x10;
+                                    rate = 31;
+                                } else {
+                                    rate = env_data & 0x1F;
+                                    if mode == 4 /* 4: linear decrease */ {
+                                        env -= 0x20; 
+                                    } else if mode < 6 /* 5: exponential decrease */ {
+                                        env -=1;
+                                        env -= env >> 8;
+                                    } else /* 6,7: linear increase */ {
+                                        env += 0x20;
+                                        if  (mode > 6) && (v.hidden_env as usize) >= 0x600 {
+                                            env += 0x8 - 0x20; //7: two-slope linear increase 
+                                        }
+                                    }
+                                }
+                            }
+                            // Sustain level
+                            if ((env >> 8) == (env_data >> 5)) && (v.env_mode == env_decay) {
+                                v.env_mode = env_sustain; 
+                            }
+                            v.hidden_env = env;
+
+                            //unsigned cast because linear decrease going negative also triggers
+                            //this
+                            if ((env as usize )> 0x7FF) {
+                                if env < 0 { env = 0; }
+                                else { env = 0x7FF; }
+                                if v.env_mode == registers::EnvMode::env_attack {
+                                    v.env_mode = registers::EnvMode::env_decay;
+                                }
+                            }
+
+                            if read_counter!(rate) == 0 {
+                                v.env = env;  // nothing else is controlled by the counter
+                            }
+                        }
+                    }
+                //exit_env
                 }
-
-
+                //skip_brr
             }
-
             
         }
-        
-        
     }
-
-
 }
 
 
