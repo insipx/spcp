@@ -94,13 +94,13 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             return; 
         }
         
-        let dir: Vec<u8> = self.m.ram[(self.m.regs[reg!(dir)] * 0x100)..(0xFFFF)]; 
+        let dir: Vec<u8> = self.m.ram[((self.m.regs[reg!(dir)] * 0x100) as usize)..(0xFFFF as usize)].to_vec(); 
         //let dir: [u8; (Sizes::RAM_SIZE - (self.m.regs[reg!(dir)] * 0x100i64))] = self.m.ram[(self.m.regs[reg!(dir)] * 0x100)..(Sizes::RAM_SIZE)];
         let slow_gaussian:i64 = ((self.m.regs[reg!(pmon)] >> 1) | self.m.regs[reg!(non)]) as i64; 
         let noise_rate:i64 = (self.m.regs[reg!(flg)] & 0x1F) as i64;
 
         //global volume
-        let mvoll:i8 = self.m.regs[reg!(mvoll)] as i8;
+        let mut mvoll:i8 = self.m.regs[reg!(mvoll)] as i8;
         let mvolr:i8 = self.m.regs[reg!(mvolr)] as i8;
 
         if ((mvoll * mvolr) as i64) < self.m.surround_threshold {
@@ -131,7 +131,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             let main_out_r = 0;
             let echo_out_l = 0;
             let echo_out_r = 0;
-            let v:Voice = self.m.voices[0];
+            let mut v:Voice = self.m.voices[0];
             let vbit = 1;
 
             loop {

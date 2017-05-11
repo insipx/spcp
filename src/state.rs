@@ -34,7 +34,7 @@ pub struct State<'a> {
     pub voices: [Voice; Sizes::VOICE_COUNT as usize],
         //hold the address, actual implementation in C++ is: unsigned* counter_select[32] (an array of pointers, store place in arr instead)
     pub counter_select: [u32; 32], 
-    pub ram: &'a Vec<u8>,
+    pub ram: Vec<u8>,
     //pub ram: [u8; Sizes::RAM_SIZE as usize], // 64K shared RAM between DSP and SMP
     pub mute_mask: i64,
     pub surround_threshold: i64,
@@ -45,9 +45,9 @@ pub struct State<'a> {
 }
 
 //functions that directly modify the state
-impl State<'static> {
+impl<'a> State<'a> {
     
-    pub fn new() -> State<'static> {
+    pub fn new() -> State<'a> {
 
         State {
             regs: [0; Sizes::REGISTER_COUNT as usize],
@@ -63,7 +63,7 @@ impl State<'static> {
             t_koff: 0,
             voices: [Voice::new(); Sizes::VOICE_COUNT as usize],
             counter_select: [0;32],
-            ram: &Vec::new(), // 64K shared RAM between DSP and SMP
+            ram: Vec::new(), // 64K shared RAM between DSP and SMP
             mute_mask: 0,
             surround_threshold: 0,
             out: None,
@@ -73,8 +73,11 @@ impl State<'static> {
         }
     }
     
-    pub fn set_ram(&mut self, &ram_64K: &Vec<u8>) {
-        self.ram = &ram_64K; 
+    //probably not a good idea to manually add each element
+    //but you know what
+    //screw it!
+    pub fn set_ram(&mut self, ref ram_64K: &Vec<u8>) {
+        ram_64K.iter().map(|x| self.ram.push(*x));
     }
 
     pub fn extra(&self) -> [sample_t; 16] {
@@ -102,7 +105,7 @@ impl State<'static> {
         return self.regs[addr as usize];
     }
 
-    pub fn set_output<'a>(&mut self, out: *mut sample_t, out_size: i64) {
+    pub fn set_output(&mut self, out: *mut sample_t, out_size: i64) {
         assert_eq!((out_size & 1), 0, "Out size is not even!: {}", out_size);
         
         if out.is_null() {
