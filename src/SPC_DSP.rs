@@ -43,6 +43,10 @@ pub trait Emulator<'a, 'b:'a> {
     // Runs DSP for specified number of clocks (~1024000 per second). Every 32 clocks
     // a pair of samples is to be generated
     fn run(&mut self, clock_count: i64);
+    
+    fn skip_brr(); //instead of goto
+    fn exit_env();
+
 }
 
 impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
@@ -87,6 +91,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
     }
 
     fn run(&mut self, clock_count: i64) {
+        let break_outer: bool = true;
         let new_phase: i64 = self.m.get_phase() + clock_count;
         let count: i64 = new_phase >> 5;
         self.m.set_phase((new_phase & 31)); //raises can't mutably borrow immutable field
@@ -99,7 +104,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
         let slow_gaussian:i64 = ((self.m.regs[reg!(pmon)] >> 1) | self.m.regs[reg!(non)]) as i64; 
         let noise_rate:i64 = (self.m.regs[reg!(flg)] & 0x1F) as i64;
 
-        //global volume
+        // Global volume
         let mut mvoll:i8 = self.m.regs[reg!(mvoll)] as i8;
         let mvolr:i8 = self.m.regs[reg!(mvolr)] as i8;
 
@@ -107,47 +112,49 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             mvoll = -mvoll;
         }
 
-        loop {
-            // KON/KOFF reading
-            self.m.every_other_sample ^= 1;
-            if self.m.every_other_sample != 0i64 {
-                self.m.new_kon &= !self.m.kon;
-                self.m.kon = self.m.new_kon;
-                self.m.t_koff = self.m.regs[reg!(koff)] as i64;
-            }
-
-            self.m.run_counter( 1i64 );
-            self.m.run_counter( 2i64 );
-            self.m.run_counter( 3i64 );
-
-            // Noise
-            if read_counter!(noise_rate, self.m) == 0 {
-                let feedback: i64 = (self.m.noise << 13) ^ (self.m.noise << 14);
-                self.m.noise = (feedback & 0x4000 ) ^ (self.m.noise >> 1);
-            }
-             
-            let pmon_input = 0;
-            let mut main_out_l = 0;
-            let mut main_out_r = 0;
-            let echo_out_l = 0;
-            let echo_out_r = 0;
-            let mut v:Voice = self.m.voices[0];
-            let vbit = 1;
-
-            loop {
-                macro_rules! sample_ptr {
-                    ( $i:expr ) => {
-                        dir[(self.m.regs[vreg!(srcn)] * 4 + $i * 2) as usize];
-                    }
+            'outer: loop {
+                // KON/KOFF reading
+                self.m.every_other_sample ^= 1;
+                if self.m.every_other_sample != 0i64 {
+                    self.m.new_kon &= !self.m.kon;
+                    self.m.kon = self.m.new_kon;
+                    self.m.t_koff = self.m.regs[reg!(koff)] as i64;
                 }
 
-                let mut brr_header: i64 = self.m.ram[v.brr_addr as usize] as i64;
-                let kon_delay: i64 = v.kon_delay; 
+                self.m.run_counter( 1i64 );
+                self.m.run_counter( 2i64 );
+                self.m.run_counter( 3i64 );
 
-                // Pitch
-                let mut pitch: i64 = (self.m.regs[vreg!(pitchl)].to_le() & 0x3FFF) as i64;
-                if (self.m.regs[reg!(pmon)] & vbit) != 0 {
-                    pitch += ((pmon_input >> 5) * pitch) >> 10;
+                // Noise
+                if read_counter!(noise_rate, self.m) == 0 {
+                    let feedback: i64 = (self.m.noise << 13) ^ (self.m.noise << 14);
+                    self.m.noise = (feedback & 0x4000 ) ^ (self.m.noise >> 1);
+                }
+                 
+                let pmon_input = 0;
+                let mut main_out_l = 0;
+                let mut main_out_r = 0;
+                let echo_out_l = 0;
+                let echo_out_r = 0;
+                let mut v:Voice = self.m.voices[0];
+                let mut v_regs = &m.regs[0..Sizes::REGISTER_COUNT];
+                let vbit = 1;
+
+                'inner: loop {
+                    macro_rules! sample_ptr {
+                        ( $i:expr ) => {
+                            dir[(v_regs[vreg!(srcn)] * 4 + $i * 2) as usize];
+                        }
+                    }
+
+                    let mut brr_header: i64 = self.m.ram[v.brr_addr as usize] as i64;
+                    let kon_delay: i64 = v.kon_delay; 
+
+                    // Pitch
+                    let mut pitch: i64 = (v_regs[vreg!(pitchl)].to_le() & 0x3FFF) as i64;
+                    if (self.m.regs[reg!(pmon)] & vbit) != 0 {
+                        pitch += ((pmon_input >> 5) * pitch) >> 10;
+                    }
 
                     // KON phases
                     if --kon_delay >= 0 {
@@ -172,10 +179,11 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         pitch = 0;
                     }
                     let env: i64 = v.env;
+                    
                     //Gaussian interpolation
                     {
                         let output: i64 = 0;
-                        self.m.regs[vreg!(envx)] = (env >> 4) as u8;
+                        v_regs[vreg!(envx)] = (env >> 4) as u8;
                         if env != 0 {
                             // Make pointers into gaussian based on fractional position between
                             // samples
@@ -201,60 +209,61 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                     output += (rev.wrapping_offset(1) * _in.wrapping_offset(2)) >> 11;
                                     output = output as i16;
                                     output += (rev.wrapping_offset(0) * _in.wrapping_offset(3)) >> 11;
-                                    calmp16!(output);
+                                    clamp16!(output);
                                     output &= !1;
                                 }
                                 output = (output * env) >> 11 & !1;
                             }
                             // Output
+                            
                             let l: i64 = output * v.volume[0];
                             let r: i64 = output * v.volume[1];
 
                             main_out_l += l;
                             main_out_r += r;
 
-                            if self.m.regs[reg![eon)] & vbit] != 0 {
+                            if (self.m.regs[reg!(eon)] & vbit) != 0 {
                                 echo_out_l += l;
                                 echo_out_r += r;
                             }
                         }
                         pmon_input = output;
-                        self.m.regs[vreg!(outx)] = (output >> 8) as u8;
+                        v_regs[vreg!(outx)] = (output >> 8) as u8;
                     }
 
                     // Soft reset or end of sample
-                    if ((self.m.regs[reg!(flg)]) & 0x80 != 0) || (brr_header & 3) == 1) {
-                        v.env_mode = registers::EnvMode::env_release;
+                    if ((self.m.regs[reg!(flg)]) & 0x80 != 0) || ((brr_header & 3) == 1) {
+                        v.env_mode = EnvMode::env_release;
                         env        = 0;
                     }
 
-                    if (m.every_other_sample != 0 ) {
+                    if m.every_other_sample != 0  {
                         // KOFF
                         if (self.m.t_koff & vbit) != 0 {
-                            v.env_mode = registers::EnvMode::env_release;
+                            v.env_mode = EnvMode::env_release;
                         }
 
                         // KON
                         if (m.kon & vbit) != 0 {
                             v.kon_delay = 5;
-                            v.env_mode = registers::EnvMode::env_attack;
-                            self.m.regs[reg!(endx)] &= ~vbit; 
+                            v.env_mode = EnvMode::env_attack;
+                            self.m.regs[reg!(endx)] &= !vbit; 
                         }
                     }
 
                     // Envelope
                     if v.kon_delay == 0 {
-                        if v.env_mode == registers::EnvMode::env_release { // 97%
+                        if v.env_mode == EnvMode::env_release { // 97%
                             env -= 0x8;
                             v.env = env;
-                            if env <= 0 {
-                                v.env = 0;
-                                goto skip_brr; // TODO: NO BRR decoding for you! (remove goto)
-                            }
+                                if env <= 0 {
+                                    v.env = 0;
+                                    skip_brr(); // TODO: NO BRR decoding for you! (remove goto)
+                                }
                         } else { // 3%
                             let rate: i64;
-                            let adsr0: i64 = self.m.regs[vreg!(adsr0)];
-                            let env_data: i64 = self.m.regs[vreg!(adsr1)];
+                            let adsr0: i64 = v_regs[vreg!(adsr0)];
+                            let env_data: i64 = v_regs[vreg!(adsr1)];
                             if ( adsr0 >= 0x80 ) /* 97% ADSR  */ {
                                 if  v.env_mode > regsiters::EnvMode::env_decay {
                                     env -= 1;
@@ -263,12 +272,12 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
 
                                     // optimized handling
                                     v.hidden_env = env;
-                                    if read_counter!(rate) != 0 {
-                                        goto exit_env; // TODO 
+                                    if read_counter!(rate, self.m) != 0 {
+                                        //goto exit_env; // TODO 
                                     }
                                     v.env = env;
-                                    goto exit_env; // TODO
-                                } else if v.env_mode == registers::EnvMode::env_decay {
+                                    //goto exit_env; // TODO
+                                } else if v.env_mode == EnvMode::env_decay {
                                     env -= 1;
                                     env -= env >> 8;
                                     rate = (adsr0 >> 3 & 0x0E) + 0x10;
@@ -277,9 +286,9 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                     if rate < 31 { env += 0x20;}
                                     else {env+= 0x400;}
                                 }
-                            }else /* GAIN */ {
+                            } else /* GAIN */ {
                                 let mut mode: i64;
-                                env_data = self.m.regs[vreg!(gain)];
+                                env_data = v_regs[vreg!(gain)];
                                 mode = env_data >> 5;
                                 if mode < 4  /* direct */ {
                                     env = env_data * 0x10;
@@ -310,22 +319,28 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                             if ((env as usize )> 0x7FF) {
                                 if env < 0 { env = 0; }
                                 else { env = 0x7FF; }
-                                if v.env_mode == registers::EnvMode::env_attack {
-                                    v.env_mode = registers::EnvMode::env_decay;
+                                if v.env_mode == EnvMode::env_attack {
+                                    v.env_mode = EnvMode::env_decay;
                                 }
                             }
 
-                            if read_counter!(rate) == 0 {
+                            if read_counter!(rate, self.m) == 0 {
                                 v.env = env;  // nothing else is controlled by the counter
                             }
                         }
                     }
                 //exit_env
-                }
-                //skip_brr
-            }
-            
+                skip_brr();
+                if vbit >= 0x100 {break 'inner; }
+                } // inner loop
+            } // outer loop
         }
+    fn skip_brr() {
+    
+    }
+
+    fn exit_env() {
+    
     }
 }
 

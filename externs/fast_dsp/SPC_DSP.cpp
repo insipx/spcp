@@ -546,7 +546,7 @@ skip_brr:
 			vbit <<= 1;
 			v_regs += 0x10;
 			v++;
-		}
+		} // inner loop
 		while ( vbit < 0x100 );
 		
 		// Echo position
