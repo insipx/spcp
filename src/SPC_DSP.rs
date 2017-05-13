@@ -1,4 +1,5 @@
 use std::ptr;
+use std::cell::RefCell;
 
 use state::sample_t as sample_t;
 use state::NULL_U8 as NULL_U8;
@@ -39,7 +40,7 @@ pub trait Emulator<'a, 'b:'a> {
     fn new() -> SPC_DSP; 
     fn init(&mut self, ram_64K: &Vec<u8>);
 
-    fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]);
+    fn load(&mut self, regs: [RefCell<u8>; Sizes::REGISTER_COUNT as usize]);
 
     // Runs DSP for specified number of clocks (~1024000 per second). Every 32 clocks
     // a pair of samples is to be generated
@@ -75,7 +76,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
         //SPC_DSP has a verify byte order; but i will forgo this for now
     }
 
-    fn load(&mut self, regs: [u8; Sizes::REGISTER_COUNT as usize]) {
+    fn load(&mut self, regs: [RefCell<u8>; Sizes::REGISTER_COUNT as usize]) {
         self.m.regs = regs;
 
         let mut i:i64;
@@ -84,7 +85,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
             self.m.voices[i].brr_offset = 1;
             self.m.voices[i].buf_pos = 0;
         }
-        self.m.new_kon = self.m.regs[reg!(kon)] as i64;
+        self.m.new_kon = self.m.read(reg!(kon) as i64) as i64;
         let mask = self.m.mute_mask;
         self.m.mute_voices(mask);
         self.m.soft_reset_common();
@@ -118,7 +119,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                 if self.m.every_other_sample != 0i64 {
                     self.m.new_kon &= !self.m.kon;
                     self.m.kon = self.m.new_kon;
-                    self.m.t_koff = self.m.regs[reg!(koff)] as i64;
+                    self.m.t_koff = self.m.read(reg!(koff) as i64) as i64;
                 }
 
                 self.m.run_counter( 1i64 );
@@ -145,7 +146,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                 'inner: loop {
                     macro_rules! sample_ptr {
                         ( $i:expr ) => {
-                            dir[(v_regs[vreg!(srcn)] * 4 + $i * 2) as usize];
+                            dir[(v_regs[vreg!(srcn)].borrow() * 4 + $i * 2) as usize];
                         }
                     }
 
@@ -153,8 +154,8 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     let kon_delay: i64 = v.kon_delay; 
 
                     // Pitch
-                    let mut pitch: i64 = (v_regs[vreg!(pitchl)].to_le() & 0x3FFF) as i64;
-                    if ((self.m.regs[reg!(pmon)] as i64) & vbit) != 0 {
+                    let mut pitch: i64 = (v_regs[vreg!(pitchl)].borrow().to_le() & 0x3FFF) as i64;
+                    if ((self.m.read(reg!(pmon) as i64) as i64) & vbit) != 0 {
                         pitch += ((pmon_input >> 5) * pitch) >> 10;
                     }
 
@@ -185,7 +186,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     //Gaussian interpolation
                     {
                         let mut output: i64 = 0;
-                        v_regs[vreg!(envx)] = (env >> 4) as u8;
+                        *(&mut v_regs[vreg!(envx)].borrow_mut()) = (env >> 4) as u8;
                         if env != 0 {
                             // Make pointers into gaussian based on fractional position between
                             // samples
@@ -207,7 +208,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                 output = (output * env) >> 11;
                             }else {
                                 output = self.m.noise *2;
-                                if ((self.m.regs[reg!(non)] as i64) & vbit) == 0 {
+                                if ((self.m.read(reg!(non) as i64) as i64) & vbit) == 0 {
                                     output = unsafe{(*fwd.wrapping_offset(0) * *_in.wrapping_offset(0))}  >> 11;
                                     output += unsafe{(*fwd.wrapping_offset(1) * *_in.wrapping_offset(1))} >> 11;
                                     output += unsafe{(*rev.wrapping_offset(1) * *_in.wrapping_offset(2))} >> 11;
@@ -226,17 +227,17 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                             main_out_l += l;
                             main_out_r += r;
 
-                            if ((self.m.regs[reg!(eon)] as i64) & vbit) != 0 {
+                            if ((self.m.read(reg!(eon) as i64) as i64) & vbit) != 0 {
                                 echo_out_l += l;
                                 echo_out_r += r;
                             }
                         }
                         pmon_input = output;
-                        v_regs[vreg!(outx)] = (output >> 8) as u8;
+                        *(&v_regs[vreg!(outx)].borrow_mut()) = (output >> 8) as u8;
                     }
 
                     // Soft reset or end of sample
-                    if ((self.m.regs[reg!(flg)]) & 0x80 != 0) || ((brr_header & 3) == 1) {
+                    if ((self.m.read(reg!(flg) as i64)) & 0x80 != 0) || ((brr_header & 3) == 1) {
                         v.env_mode = EnvMode::env_release;
                         env        = 0;
                     }
@@ -251,7 +252,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         if (self.m.kon & vbit) != 0 {
                             v.kon_delay = 5;
                             v.env_mode = EnvMode::env_attack;
-                            self.m.regs[reg!(endx)] &= !vbit as u8;
+                            *(&mut self.m.regs[reg!(endx)].borrow_mut()) &= !vbit as u8;
                         }
                     }
 
@@ -266,8 +267,8 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                 }
                         } else { // 3%
                             let rate: i64;
-                            let adsr0: i64 = v_regs[vreg!(adsr0)] as i64;
-                            let mut env_data: i64 = v_regs[vreg!(adsr1)] as i64;
+                            let adsr0: i64 = v_regs[vreg!(adsr0)].borrow() as i64;
+                            let mut env_data: i64 = v_regs[vreg!(adsr1)].borrow() as i64;
                             if adsr0 >= 0x80 /* 97% ADSR  */ {
                                 if  v.env_mode > EnvMode::env_decay {
                                     env -= 1;
@@ -292,7 +293,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                 }
                             } else /* GAIN */ {
                                 let mut mode: i64;
-                                env_data = v_regs[vreg!(gain)] as i64;
+                                env_data = v_regs[vreg!(gain)].borrow() as i64;
                                 mode = env_data >> 5;
                                 if mode < 4  /* direct */ {
                                     env = env_data * 0x10;

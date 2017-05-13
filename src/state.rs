@@ -1,13 +1,12 @@
 use macros;
-
-use std::ops::Add;
-use std::ptr;
+use std::cell::RefCell;
 
 use registers::VoiceRegisters;
 use registers::GlobalRegisters;
 use sizes::Sizes;
 use voice::Voice;
 use config::*;
+
 
 // Keeps track of the state of the Emulator
 // the Virtual CPU + RAM 
@@ -19,7 +18,7 @@ pub type sample_t = i16;
 pub const NULL_U8: *mut u8 = 0 as *mut u8;
 
 pub struct State<'a> {
-    pub regs: [u8; Sizes::REGISTER_COUNT as usize],
+    pub regs: [RefCell<u8>; Sizes::REGISTER_COUNT as usize],
     echo_hist: Option<[[&'a mut i64; 2]; (Sizes::ECHO_HIST_SIZE * 2) as usize]>,
     /*echo_hist_pos: [&'a mut i64; 2], //&echo hist[0 to 7]*/ //ignoring this for now
     pub every_other_sample: i64,
@@ -50,7 +49,7 @@ impl<'a> State<'a> {
     pub fn new() -> State<'a> {
 
         State {
-            regs: [0; Sizes::REGISTER_COUNT as usize],
+            regs: [RefCell::new(0).clone(); Sizes::REGISTER_COUNT as usize],
             echo_hist: None,
             every_other_sample: 0,
             kon: 0,
@@ -103,7 +102,8 @@ impl<'a> State<'a> {
 
     pub fn read(&self, addr: i64) -> u8 {
         assert!(addr < Sizes::REGISTER_COUNT as i64);
-        return self.regs[addr as usize];
+        let value: &u8 = &self.regs[addr as usize].borrow();
+        return *value; //different from original; borrowing immut with refCell
     }
 
     pub fn set_output(&mut self, out: *mut sample_t, out_size: i64) {
@@ -124,7 +124,7 @@ impl<'a> State<'a> {
 
     pub fn write(&mut self, addr: i64, data: i64) {
         assert!(addr < Sizes::REGISTER_COUNT as i64);
-        self.regs[addr as usize] = data as u8;
+        self.set_register(addr, data);
         let low: i64 = addr & 0x0F;
 
         //voice volumes
@@ -137,9 +137,14 @@ impl<'a> State<'a> {
 
             // always cleared, regardless of data written
             if addr == GlobalRegisters::r_endx as i64 {
-                self.regs[GlobalRegisters::r_endx as usize] = 0;
+                self.regs[GlobalRegisters::r_endx as usize] = RefCell::new(0);
             }
         }
+    }
+
+    pub fn set_register(&mut self, addr: i64, data: i64) {
+        assert!(addr < Sizes::REGISTER_COUNT as i64);
+        self.regs[addr as usize] = RefCell::new(data as u8);
     }
 
     pub fn init_counter(&mut self) {
@@ -203,8 +208,8 @@ impl<'a> State<'a> {
 
     //TODO: no way will this work, using it as a basis
     pub fn update_voice_vol(&mut self, addr: i64) {
-        let mut l: i64 = self.regs[(addr + VoiceRegisters::v_voll as i64) as usize] as i64;
-        let mut r: i64 = self.regs[(addr + VoiceRegisters::v_volr as i64) as usize] as i64;
+        let mut l: i64 = self.read( (addr + VoiceRegisters::v_voll as i64)) as i64;
+        let mut r: i64 =  self.read( (addr + VoiceRegisters::v_volr as i64)) as i64;
         if l * r < self.surround_threshold {
             //signs differ, so negate those that are negative
             l ^= l >> 7;
