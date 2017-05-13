@@ -5,6 +5,7 @@ use state::NULL_U8 as NULL_U8;
 use registers::GlobalRegisters;
 use registers::VoiceRegisters;
 use registers::EnvMode;
+use registers::interleved_gauss;
 use sizes::Sizes;
 use state::State;
 use voice::Voice;
@@ -44,7 +45,6 @@ pub trait Emulator<'a, 'b:'a> {
     // a pair of samples is to be generated
     fn run(&mut self, clock_count: i64);
     
-    fn skip_brr(); //instead of goto
     fn exit_env();
 
 }
@@ -131,14 +131,16 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                     self.m.noise = (feedback & 0x4000 ) ^ (self.m.noise >> 1);
                 }
                  
-                let pmon_input = 0;
+                let mut pmon_input = 0;
                 let mut main_out_l = 0;
                 let mut main_out_r = 0;
-                let echo_out_l = 0;
-                let echo_out_r = 0;
-                let mut v:Voice = self.m.voices[0];
-                let mut v_regs = &m.regs[0..Sizes::REGISTER_COUNT];
-                let vbit = 1;
+                let mut echo_out_l = 0;
+                let mut echo_out_r = 0;
+                let mut voice_indx = 0;
+                let mut v:Voice = self.m.voices[voice_indx];
+                let mut vreg_start:usize = 0;
+                let mut v_regs = &mut self.m.regs[vreg_start..Sizes::REGISTER_COUNT];
+                let mut vbit: i64 = 1;
 
                 'inner: loop {
                     macro_rules! sample_ptr {
@@ -152,7 +154,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
 
                     // Pitch
                     let mut pitch: i64 = (v_regs[vreg!(pitchl)].to_le() & 0x3FFF) as i64;
-                    if (self.m.regs[reg!(pmon)] & vbit) != 0 {
+                    if ((self.m.regs[reg!(pmon)] as i64) & vbit) != 0 {
                         pitch += ((pmon_input >> 5) * pitch) >> 10;
                     }
 
@@ -162,8 +164,8 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         if kon_delay == 4 {
                             v.brr_addr   =  sample_ptr!(0) as i64;
                             v.brr_offset = 1;
-                            v.buf_pos    = v.buf;
-                            vrr_header   = 0;
+                            v.buf_pos    = 0;
+                            brr_header   = 0;
                         }
 
                         // Envelope is never run during KON
@@ -178,38 +180,40 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         }
                         pitch = 0;
                     }
-                    let env: i64 = v.env;
+                    let mut env: i64 = v.env;
                     
                     //Gaussian interpolation
                     {
-                        let output: i64 = 0;
+                        let mut output: i64 = 0;
                         v_regs[vreg!(envx)] = (env >> 4) as u8;
                         if env != 0 {
                             // Make pointers into gaussian based on fractional position between
                             // samples
-                            let mut offset: i64 = ((v.interp_pos >> (3 & 0x1FE)) as usize) as i64;
-                            let fwd: *const i16 = &registers::interleved_gauss[0] + offset as usize;
-                            let rev: *const i16 = &regsiters::interleved_gauss[0] + 510 - (offset as usize);
+                            let mut offset: isize = (v.interp_pos >> (3 & 0x1FE)) as isize;
+                            let fwd: *const i64 = (&(interleved_gauss[0] as i64) as *const i64).wrapping_offset(offset);
+                            let rev: *const i64 = (&(interleved_gauss[0] as i64) as *const i64).wrapping_offset(510).wrapping_offset(-offset);
                             
-                            let _in: *const i64 = &v.buf_pos[(v.interp_pos >> 12) as usize];
+                            let _in: *const i64 = &v.buf[(v.buf_pos) + (v.interp_pos >> 12) as usize];
                             
                             if (slow_gaussian & vbit) == 0 { //99%
                                 // Faster approximation when exact sample value isn't necessary for
                                 // pitch mod 
-                                output = (fwd * _in +
-                                          fwd.wrapping_offset(1) * _in.wrapping_offset(1) +
-                                          rev.wrapping_offset(1) * _in.wrapping_offset(2) +
-                                          rev.wrapping_offset(1) * _in.wrapping_offset(3)) >> 11;
+                                output = 
+                                    unsafe{
+                                        (*fwd * *_in +
+                                          *fwd.wrapping_offset(1) * *_in.wrapping_offset(1) +
+                                          *rev.wrapping_offset(1) * *_in.wrapping_offset(2) +
+                                          *rev.wrapping_offset(1) * *_in.wrapping_offset(3)) >> 11};
                                 output = (output * env) >> 11;
                             }else {
-                                output = (m.noise *2 ) as i16;
-                                if (self.m.regs[reg!(non)] & vbit) == 0 {
-                                    output = (fwd.wrapping_offset(0) * _in.wrapping_offset(0))  >> 11;
-                                    output += (fwd.wrapping_offset(1) * _in.wrapping_offset(1)) >> 11;
-                                    output += (rev.wrapping_offset(1) * _in.wrapping_offset(2)) >> 11;
-                                    output = output as i16;
-                                    output += (rev.wrapping_offset(0) * _in.wrapping_offset(3)) >> 11;
-                                    clamp16!(output);
+                                output = self.m.noise *2;
+                                if ((self.m.regs[reg!(non)] as i64) & vbit) == 0 {
+                                    output = unsafe{(*fwd.wrapping_offset(0) * *_in.wrapping_offset(0))}  >> 11;
+                                    output += unsafe{(*fwd.wrapping_offset(1) * *_in.wrapping_offset(1))} >> 11;
+                                    output += unsafe{(*rev.wrapping_offset(1) * *_in.wrapping_offset(2))} >> 11;
+                                    output = output;
+                                    output += unsafe{(*rev.wrapping_offset(0) * *_in.wrapping_offset(3))} >> 11;
+                                    //clamp16!(output as i16);
                                     output &= !1;
                                 }
                                 output = (output * env) >> 11 & !1;
@@ -222,7 +226,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                             main_out_l += l;
                             main_out_r += r;
 
-                            if (self.m.regs[reg!(eon)] & vbit) != 0 {
+                            if ((self.m.regs[reg!(eon)] as i64) & vbit) != 0 {
                                 echo_out_l += l;
                                 echo_out_r += r;
                             }
@@ -237,17 +241,17 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         env        = 0;
                     }
 
-                    if m.every_other_sample != 0  {
+                    if self.m.every_other_sample != 0  {
                         // KOFF
                         if (self.m.t_koff & vbit) != 0 {
                             v.env_mode = EnvMode::env_release;
                         }
 
                         // KON
-                        if (m.kon & vbit) != 0 {
+                        if (self.m.kon & vbit) != 0 {
                             v.kon_delay = 5;
                             v.env_mode = EnvMode::env_attack;
-                            self.m.regs[reg!(endx)] &= !vbit; 
+                            self.m.regs[reg!(endx)] &= !vbit as u8;
                         }
                     }
 
@@ -258,14 +262,14 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                             v.env = env;
                                 if env <= 0 {
                                     v.env = 0;
-                                    skip_brr(); // TODO: NO BRR decoding for you! (remove goto)
+                                    // TODO: NO BRR decoding for you! (remove goto)
                                 }
                         } else { // 3%
                             let rate: i64;
-                            let adsr0: i64 = v_regs[vreg!(adsr0)];
-                            let env_data: i64 = v_regs[vreg!(adsr1)];
-                            if ( adsr0 >= 0x80 ) /* 97% ADSR  */ {
-                                if  v.env_mode > regsiters::EnvMode::env_decay {
+                            let adsr0: i64 = v_regs[vreg!(adsr0)] as i64;
+                            let mut env_data: i64 = v_regs[vreg!(adsr1)] as i64;
+                            if adsr0 >= 0x80 /* 97% ADSR  */ {
+                                if  v.env_mode > EnvMode::env_decay {
                                     env -= 1;
                                     env -= env >> 8;
                                     rate = env_data & 0x1F;
@@ -288,7 +292,7 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                 }
                             } else /* GAIN */ {
                                 let mut mode: i64;
-                                env_data = v_regs[vreg!(gain)];
+                                env_data = v_regs[vreg!(gain)] as i64;
                                 mode = env_data >> 5;
                                 if mode < 4  /* direct */ {
                                     env = env_data * 0x10;
@@ -309,14 +313,14 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                                 }
                             }
                             // Sustain level
-                            if ((env >> 8) == (env_data >> 5)) && (v.env_mode == env_decay) {
-                                v.env_mode = env_sustain; 
+                            if ((env >> 8) == (env_data >> 5)) && (v.env_mode == EnvMode::env_decay) {
+                                v.env_mode = EnvMode::env_sustain; 
                             }
                             v.hidden_env = env;
 
                             //unsigned cast because linear decrease going negative also triggers
                             //this
-                            if ((env as usize )> 0x7FF) {
+                            if (env as usize )> 0x7FF {
                                 if env < 0 { env = 0; }
                                 else { env = 0x7FF; }
                                 if v.env_mode == EnvMode::env_attack {
@@ -330,17 +334,18 @@ impl<'a, 'b:'a> Emulator<'a, 'b> for SPC_DSP {
                         }
                     }
                 //exit_env
-                skip_brr();
+                // skip_brr
+                vbit <<= 1;
+                vreg_start += 0x10;
+                let v_regs = &mut self.m.regs[vreg_start..Sizes::REGISTER_COUNT];
+                voice_indx+=1;
+                v = self.m.voices[voice_indx];
                 if vbit >= 0x100 {break 'inner; }
                 } // inner loop
             } // outer loop
         }
-    fn skip_brr() {
-    
-    }
-
     fn exit_env() {
-    
+     
     }
 }
 

@@ -34,7 +34,7 @@ pub enum VoiceRegisters {
     v_outx = 0x09,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum EnvMode {
     env_release,
     env_attack,

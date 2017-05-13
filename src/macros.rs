@@ -5,7 +5,7 @@ macro_rules! clamp16 {
     ( $io:expr ) => {
         {
             if ($io as i16) != $io {
-                $io:i16 = ($io >> 31) ^ 0x7FFF; 
+                $io = ($io >> 31) ^ 0x7FFF; 
             }
         }
     };
